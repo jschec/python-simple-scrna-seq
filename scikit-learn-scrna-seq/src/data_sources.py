@@ -3,11 +3,13 @@ import dask.dataframe as dd
 import dask.array as da
 import mimetypes
 import os
+import time
+
 
 class MetaData():
     def __init__(self, file_path: str, index_col: str) -> None:
         self.__file_path = file_path
-        self.__file_type = mimetypes.guess_type(file_path)
+        self.__file_type = mimetypes.guess_type(file_path)[0]
         self._index_col = index_col
         self._data = None
 
@@ -27,10 +29,15 @@ class MetaData():
     def ncols(self) -> int:
         return len(self._data.columns)
 
-    def _load(self) -> None:
-        print(self.__file_type)
-        self._data = dd.read_csv(self.__file_path)
+    def _load(self) -> bool:
+        if self.__file_type == "text/csv":
+            self._data = dd.read_csv(self.__file_path)
+        else:
+            print(self.__file_type == "text/csv", self.__file_type)
+            return False
+
         self._data.set_index(self._index_col)
+        return True
         
 
 class GeneMetaData(MetaData):
@@ -45,11 +52,12 @@ class GeneMetaData(MetaData):
 class CellMetaData(MetaData):
     def __init__(self, file_path: str, index_col: str):
         super().__init__(file_path, index_col)
-        self._load()
+        load_status = self._load()
+        print("CellMetaData load_status:", load_status)
 
     #TODO - confirm return type
     @property
-    def cells(self) -> series:
+    def samples(self) -> series:
         return self._data[self._index_col].compute()
 
 
@@ -57,13 +65,19 @@ class ExpressionMatrix():
     
     def __init__(self, file_path: str) -> None:
         self.__file_path = file_path
-        self.__file_type = mimetypes.guess_type(file_path)
+        self.__file_type = mimetypes.guess_type(file_path)[0]
         self._data = None
-        self._load()
+        load_status = self._load()
+        print("ExpressionMatrix load_status:", load_status)
 
     @property
     def data(self) -> da:
         return self._data
+
+    #TODO - add error handling
+    @data.setter
+    def data(self, new_data):
+         self._data = new_data
 
     @property
     def nrows(self) -> int:
@@ -74,36 +88,55 @@ class ExpressionMatrix():
         pass
 
     def _load(self) -> None:
-        print(self.__file_type)
-        print(self.__file_path, os.path.isfile(self.__file_path))
-        # read into df in 25MB chunks
-        df = dd.read_csv(self.__file_path, blocksize=25e6, sample=1000000)
-        print(df.head())
-        self._data = df.to_dask_array() #lengths=True
+        if self.__file_type == "text/csv":
+            # read into df in 25MB chunks
+            print("Reading csv...")
+            tic = time.perf_counter()
+            df = dd.read_csv(self.__file_path, blocksize=25e6, sample=1000000)
+            toc = time.perf_counter()
+            print(f"Eclipsed time: {toc - tic:0.4f} seconds")
+            print(df.head())
+            
+            print()
+            print("to dask array...")
+            tic = time.perf_counter()
+            self._data = df.to_dask_array() #lengths=True
+            toc = time.perf_counter()
+            print(f"Eclipsed time: {toc - tic:0.4f} seconds")
+
+            print()
+            print("compute chunk sizes...")
+            tic = time.perf_counter()
+            self._data.compute_chunk_sizes()
+            toc = time.perf_counter()
+            print(f"Eclipsed time: {toc - tic:0.4f} seconds")
+
+            print(self._data[0])
+            print(self._data.shape)
+        else:
+            print(self.__file_type == "text/csv", self.__file_type)
+            return False
+
+        return True
 
 
 class SCDataSet():
 
-    def __init__(self, expr_matrix: da, sample_annot: dd = None, gene_annot: dd = None) -> None:
+    def __init__(self, expr_matrix: ExpressionMatrix, sample_annot: CellMetaData = None, gene_annot: GeneMetaData = None) -> None:
         self.__expr_matrix = expr_matrix
         self.__sample_annot = sample_annot
         self.__gene_annot = gene_annot
 
     @property
-    def expression_matrix(self) -> da:
+    def expression_matrix(self) -> ExpressionMatrix:
         return self.__expr_matrix
 
-    #TODO - add error
-    @expression_matrix.setter
-    def expression_matrix(self, new_matrix):
-         self.__expr_matrix = new_matrix
-
     @property
-    def cell_meta_data(self) -> dd:
+    def cell_meta_data(self) -> CellMetaData:
         return self.__sample_annot
 
     @property
-    def gene_meta_data(self) -> dd:
+    def gene_meta_data(self) -> GeneMetaData:
         return self.__gene_annot
 
     @property
@@ -112,7 +145,7 @@ class SCDataSet():
 
     @property
     def samples(self) -> series:
-        return self.__gene_annot.samples
+        return self.__sample_annot.samples
 
     @property
     def expression_matrix_shape(self) -> tuple:

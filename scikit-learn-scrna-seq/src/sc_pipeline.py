@@ -1,6 +1,9 @@
-#from sklearn.pipeline import Pipeline
+from sklearn.pipeline import Pipeline
 from dask_ml.preprocessing import StandardScaler
+from dask_ml.decomposition import PCA
+from dask_ml.impute import SimpleImputer
 import dask.dataframe as dd
+#import umap
 from .data_sources import SCDataSet
 
 class SCRNASeqPipeline():
@@ -13,20 +16,22 @@ class SCRNASeqPipeline():
         return self.__data_src
 
      # TODO - implement
-    def normalize_expression(self) -> None:
-        #numeric_transformer = Pipeline(steps=[
-        #    ('imputer', SimpleImputer(strategy='median')),
-        #    ('scaler', StandardScaler())
-        #])
-        scaler = StandardScaler()
-        self.__data_src.expression_matrix = scaler.transform(self.__data_src.expression_matrix)
+    def normalize_expression(self, num_dim=100) -> None:
+        transformer = Pipeline(steps=[
+            ('imputer', SimpleImputer(strategy='mean')),
+            ('scaler', StandardScaler()),
+            ('pca', PCA(n_components=num_dim))
+        ])
+        test = transformer.fit_transform(self.__data_src.expression_matrix.data)
+        print(test)
 
     # TODO - implement
     def remove_batch_effects(self) -> None:
         pass
 
     # TODO - implement
-    def reduce_dimensions(self) -> None:
+    def reduce_dimensions(self, type: str) -> None:
+        #X_embedded = TSNE(n_components=2).fit_transform(X)
         pass
 
     # TODO - implement
